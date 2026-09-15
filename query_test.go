@@ -49,7 +49,7 @@ func TestQueryConstructors(t *testing.T) {
 		},
 		{
 			name:  "MultiMatch 跨字段",
-			query: esx.MultiMatch("手机"),
+			query: esx.MultiMatch("手机", nil),
 			path:  []string{"multi_match", "query"},
 			want:  "手机",
 		},
@@ -173,7 +173,7 @@ func TestTermsAndMatchAll(t *testing.T) {
 
 	t.Run("MultiMatch 指定字段", func(t *testing.T) {
 		t.Parallel()
-		m := queryJSON(t, esx.MultiMatch("手机", "title", "body"))
+		m := queryJSON(t, esx.MultiMatch("手机", []string{"title", "body"}))
 		fields, ok := dig(m, "multi_match", "fields").([]any)
 		if !ok || len(fields) != 2 {
 			t.Fatalf("fields 应为 2 元素数组，实得 %#v", dig(m, "multi_match", "fields"))

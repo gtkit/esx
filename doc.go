@@ -31,6 +31,15 @@
 //		Page(1, 20).
 //		Do(ctx)
 //
+// # 分词验证
+//
+// 检索结果不符预期时，先看文本被切成了什么词：
+//
+//	tokens, err := c.Analyze(ctx, "永久免费的搜索引擎",
+//		esx.WithAnalyzeIndex("articles"),
+//		esx.WithAnalyzer("ik_max_word"),
+//	)
+//
 // # 错误处理
 //
 // 资源不存在统一为哨兵错误 [ErrNotFound]，用 errors.Is 判断；其余来自 Elasticsearch

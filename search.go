@@ -3,6 +3,7 @@ package esx
 import (
 	"context"
 	"errors"
+	"slices"
 	"strconv"
 
 	"github.com/elastic/go-elasticsearch/v9/typedapi/core/search"
@@ -35,11 +36,83 @@ type Search[T any] struct {
 	size        *int
 	searchAfter []types.FieldValue
 
-	highlightFields []string
-	includes        []string
-	excludes        []string
+	// highlightFields 按加入顺序保存高亮字段，highlightPerField 只存显式配过的字段。
+	// 两者分开是因为字段可以只出现在 Highlight 里而不带任何配置。
+	highlightFields   []string
+	highlightPerField map[string]*highlightConfig
+	highlightGlobal   *highlightConfig
+
+	includes []string
+	excludes []string
+
+	trackTotalHits types.TrackHits
 
 	aggs map[string]types.Aggregations
+}
+
+// highlightConfig 是一层高亮配置，既可作全局默认，也可绑定到单个字段。
+type highlightConfig struct {
+	preTags           []string
+	postTags          []string
+	fragmentSize      *int
+	numberOfFragments *int
+}
+
+// HighlightOption 配置高亮，可用于全局默认与单个字段两处。
+type HighlightOption func(*highlightConfig)
+
+// WithHighlightTags 设置包裹命中片段的标签对。Elasticsearch 默认是 <em> 与 </em>。
+func WithHighlightTags(pre, post string) HighlightOption {
+	return func(c *highlightConfig) {
+		c.preTags = []string{pre}
+		c.postTags = []string{post}
+	}
+}
+
+// WithHighlightFragmentSize 设置每个高亮片段的字符数。非正值被忽略。
+func WithHighlightFragmentSize(n int) HighlightOption {
+	return func(c *highlightConfig) {
+		if n > 0 {
+			c.fragmentSize = &n
+		}
+	}
+}
+
+// WithHighlightFragments 设置每个字段最多返回的片段数。负值被忽略。
+//
+// 取 0 时 Elasticsearch 不做分片，返回整个字段内容并在其中标出命中，
+// 适合标题这类本身就短的字段。
+func WithHighlightFragments(n int) HighlightOption {
+	return func(c *highlightConfig) {
+		if n >= 0 {
+			c.numberOfFragments = &n
+		}
+	}
+}
+
+func newHighlightConfig(opts []HighlightOption) *highlightConfig {
+	c := &highlightConfig{}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
+}
+
+// applyGlobal 把配置填到高亮的顶层，作为所有字段的默认值。
+func (c *highlightConfig) applyGlobal(h *types.Highlight) {
+	h.PreTags = c.preTags
+	h.PostTags = c.postTags
+	h.FragmentSize = c.fragmentSize
+	h.NumberOfFragments = c.numberOfFragments
+}
+
+// applyField 把配置填到单个字段。Elasticsearch 以字段级优先于顶层，
+// 覆盖关系由它保证，本包不在客户端侧合并两层取值。
+func (c *highlightConfig) applyField(f *types.HighlightField) {
+	f.PreTags = c.preTags
+	f.PostTags = c.postTags
+	f.FragmentSize = c.fragmentSize
+	f.NumberOfFragments = c.numberOfFragments
 }
 
 // NewSearch 创建针对 index 的查询构建器。index 可以是索引名或别名。
@@ -112,9 +185,41 @@ func (s *Search[T]) SearchAfter(values ...types.FieldValue) *Search[T] {
 	return s
 }
 
-// Highlight 指定需要高亮的字段。高亮片段在结果的 Hit.Highlight 中返回。
+// Highlight 指定需要高亮的字段，沿用 HighlightWith 设的全局配置。
+// 高亮片段在结果的 Hit.Highlight 中返回。
 func (s *Search[T]) Highlight(fields ...string) *Search[T] {
-	s.highlightFields = append(s.highlightFields, fields...)
+	for _, field := range fields {
+		s.addHighlightField(field)
+	}
+	return s
+}
+
+// addHighlightField 追加一个高亮字段，已经在列的不重复追加。
+// Highlight 与 HighlightField 可以指到同一个字段，去重收敛在这里。
+func (s *Search[T]) addHighlightField(field string) {
+	if !slices.Contains(s.highlightFields, field) {
+		s.highlightFields = append(s.highlightFields, field)
+	}
+}
+
+// HighlightWith 设置高亮的全局配置，作用于所有高亮字段。
+//
+// 它只设默认值，不会让任何字段参与高亮——字段仍要经 Highlight 或
+// HighlightField 指定，一个都没有时请求中不含高亮结构。
+func (s *Search[T]) HighlightWith(opts ...HighlightOption) *Search[T] {
+	s.highlightGlobal = newHighlightConfig(opts)
+	return s
+}
+
+// HighlightField 指定一个高亮字段并给它单独的配置，未设的项沿用全局配置。
+//
+// 同一字段重复指定时后一次的配置生效。
+func (s *Search[T]) HighlightField(field string, opts ...HighlightOption) *Search[T] {
+	if s.highlightPerField == nil {
+		s.highlightPerField = make(map[string]*highlightConfig)
+	}
+	s.addHighlightField(field)
+	s.highlightPerField[field] = newHighlightConfig(opts)
 	return s
 }
 
@@ -136,6 +241,25 @@ func (s *Search[T]) Agg(name string, agg types.Aggregations) *Search[T] {
 		s.aggs = make(map[string]types.Aggregations)
 	}
 	s.aggs[name] = agg
+	return s
+}
+
+// TrackTotalHits 把精确统计命中总数的上界抬到 upTo 条。非正值被忽略。
+//
+// Elasticsearch 默认只精确统计到 10000 条，超出时 Result.Total 是下界而非精确值，
+// Result.TotalRelation 为 "gte"。上界抬得越高，深分页的统计代价越大。
+func (s *Search[T]) TrackTotalHits(upTo int) *Search[T] {
+	if upTo > 0 {
+		s.trackTotalHits = upTo
+	}
+	return s
+}
+
+// TrackAllHits 要求精确统计全部命中总数，使 Result.TotalRelation 恒为 "eq"。
+//
+// 代价随匹配文档数增长，大结果集上比默认行为慢。
+func (s *Search[T]) TrackAllHits() *Search[T] {
+	s.trackTotalHits = true
 	return s
 }
 
@@ -209,14 +333,23 @@ func (s *Search[T]) buildRequest() *search.Request {
 	req.Sort = s.sorts
 	req.SearchAfter = s.searchAfter
 	req.Aggregations = s.aggs
+	req.TrackTotalHits = s.trackTotalHits
 
 	if len(s.highlightFields) > 0 {
 		fields := make(map[string]types.HighlightField, len(s.highlightFields))
-		for _, f := range s.highlightFields {
-			fields[f] = types.HighlightField{}
+		for _, name := range s.highlightFields {
+			field := types.HighlightField{}
+			if cfg := s.highlightPerField[name]; cfg != nil {
+				cfg.applyField(&field)
+			}
+			fields[name] = field
 		}
 		// v9 的 Highlight.Fields 是 []map[string]HighlightField，v8 是 map[string]HighlightField。
-		req.Highlight = &types.Highlight{Fields: []map[string]types.HighlightField{fields}}
+		h := &types.Highlight{Fields: []map[string]types.HighlightField{fields}}
+		if s.highlightGlobal != nil {
+			s.highlightGlobal.applyGlobal(h)
+		}
+		req.Highlight = h
 	}
 
 	if len(s.includes) > 0 || len(s.excludes) > 0 {

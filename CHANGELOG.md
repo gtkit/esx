@@ -2,6 +2,36 @@
 
 本文件记录 esx 的版本变更。
 
+## [v0.2.0] - 2026-09-15
+
+### Added
+
+- **文本分析**：`Analyze` 把一段文本按指定方式切成词项返回，携带词项文本、类型、位置与起止偏移。分析方式有三种指定途径，可按需组合：`WithAnalyzer` 给出分析器名称、`WithAnalyzeField` 沿用某字段 mapping 的配置、`WithAnalyzeTokenizer` 与 `WithAnalyzeFilters` 临时拼一条分析链；`WithAnalyzeIndex` 让索引 settings 中定义的自定义分析器可以按名字引用。待分析文本为空时在发出请求前被拒绝，索引不存在归一到 `ErrNotFound`。
+- **高亮两层配置**：`HighlightWith` 设全局默认，`HighlightField` 给单个字段单独配置，两层都支持标签对（`WithHighlightTags`）、片段大小（`WithHighlightFragmentSize`）、片段数量（`WithHighlightFragments`）。字段级优先于全局，覆盖关系由 Elasticsearch 保证，本包不在客户端侧合并两层取值。原 `Highlight(fields...)` 的签名与行为不变，此时该字段沿用全局配置。
+- **命中总数统计精度**：`TrackTotalHits(upTo)` 把精确统计的上界抬到指定条数，`TrackAllHits()` 要求精确统计全部命中。未设置时不生成该结构，保持 Elasticsearch 默认只精确统计到 10000 条的行为。
+
+- **布尔组合器**：`Any`、`All`、`Not` 把若干查询组合成一个可嵌套的 bool 查询，分别表达「至少命中其一」「全部命中」「全部不命中」。`Any` 显式设置 `minimum_should_match` 而不依赖 Elasticsearch 的默认值——该默认值在同级存在 `must` 或 `filter` 时为 0、否则为 1，靠默认值会让同一个组合在不同上下文里语义不同。三者不传子句时生成不施加约束的查询，使「条件列表为空」不会变成匹配不到任何文档。
+
+### Changed
+
+- **依赖**：`github.com/elastic/elastic-transport-go/v8` 由 v8.9.0 升到 v8.11.0。本包只用到其 `WithTransport`，两版行为一致（都是把自建 transport 装进 `Config.Transport`），v8.11.0 仅为选项补了名称元信息。`go-elasticsearch/v9` 仍为 v9.5.2，间接依赖无增减。
+
+- **⚠ `MultiMatch` 签名变更**：`MultiMatch(query string, fields ...string)` 改为 `MultiMatch(query string, fields []string, opts ...MultiMatchOption)`。变参 `fields` 占住末位，无法再追加变参选项，跨字段匹配的 `type` 与 `operator` 因此一直取 Elasticsearch 默认值（`best_fields` 与 `or`），跨字段中文检索常用的 `cross_fields` 取不到。改切片让选项有位置可放，导出面保持单一入口而不是留一对双胞胎函数。
+
+  迁移：字段列表由变参改为切片，其余不变。
+
+  ```go
+  // 旧
+  esx.MultiMatch("手机", "title", "body")
+  // 新
+  esx.MultiMatch("手机", []string{"title", "body"})
+  // 新增能力
+  esx.MultiMatch("张三 北京", []string{"name", "city", "address"},
+      esx.WithMultiMatchType(textquerytype.Crossfields),
+      esx.WithMultiMatchOperator(operator.And),
+  )
+  ```
+
 ## [v0.1.1] - 2026-09-15
 
 ### Fixed

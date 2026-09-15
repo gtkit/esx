@@ -90,6 +90,10 @@ func main() {
 | `b.Add/Flush/Close/Stats` | 提交 / 刷写 / 关闭 / 统计 |
 | `NewSearch[T](c, index)` | 构造泛型查询 |
 | `s.Do/DoAgg/Count` | 执行查询 / 只取聚合 / 只取总数 |
+| `s.HighlightWith/HighlightField` | 设高亮全局配置 / 带配置地加高亮字段 |
+| `s.TrackTotalHits/TrackAllHits` | 抬高总数精确统计上界 / 要求全量精确 |
+| `c.Analyze(ctx, text, opts...)` | 分析文本，返回切出的词项 |
+| `Any/All/Not(queries...)` | 布尔组合器，用于嵌套条件 |
 
 ## Options
 
@@ -252,7 +256,10 @@ s := esx.NewSearch[Order](c, "orders").
 	MinimumShouldMatch(1).
 	Sort("created_at", false).Sort("id", true).       // 多级排序按调用顺序
 	Page(2, 20).
-	Highlight("title").
+	HighlightWith(esx.WithHighlightTags("<mark>", "</mark>")). // 全局默认
+	Highlight("body").                                 // 沿用全局配置
+	HighlightField("title", esx.WithHighlightFragments(0)).    // 字段级覆盖
+	TrackTotalHits(50000).
 	Select("id", "title", "status")
 
 res, err := s.Do(ctx)        // 命中解码为 Order
@@ -266,13 +273,78 @@ aggs, err := s.Agg("by_status", statusAgg).DoAgg(ctx) // size 置 0，只取聚�
 `Exists`、`MatchAll`、`Range`、`DateRange`。未覆盖的查询直接构造 `types.Query` 传给
 `Must` / `Filter` 即可。
 
+`MultiMatch` 可指定多字段得分的合成方式与词项间的逻辑关系：
+
+```go
+esx.MultiMatch("张三 北京", []string{"name", "city", "address"},
+	esx.WithMultiMatchType(textquerytype.Crossfields), // 多字段当一个大字段统一算词频
+	esx.WithMultiMatchOperator(operator.And),
+)
+```
+
+`MultiMatchOption` 直接作用于底层的 `types.MultiMatchQuery`，本包未给出构造函数的参数
+（如 `Fuzziness`、`TieBreaker`）自行写一个选项设置即可。
+
+嵌套的布尔条件用组合器表达，不必手拼 `types.BoolQuery`：
+
+| 组合器 | 含义 |
+|---|---|
+| `Any(queries...)` | 至少命中其中一个 |
+| `All(queries...)` | 全部命中 |
+| `Not(queries...)` | 全部不命中 |
+
+```go
+// status=paid 且 (title 含手机 或 body 含手机)
+esx.NewSearch[Order](c, "orders").
+	Filter(esx.Term("status", "paid")).
+	Must(esx.Any(esx.Match("title", "手机"), esx.Match("body", "手机")))
+```
+
 ### 使用约束
 
 - 同类子句多次调用是累积而非覆盖；`Agg` 同名重复追加时后者覆盖前者。
+- **`Should` 与 `Must` / `Filter` 同用时不构成过滤条件**。Elasticsearch 的规则是：bool
+  查询含至少一个 `should` 且没有 `must` 与 `filter` 时，`minimum_should_match` 默认为 1，
+  否则默认为 0（`must_not` 不影响该默认值）。也就是说 `Filter(x).Should(a, b)` 命中的
+  文档不必满足 a 或 b，两者只参与打分。要表达「必须命中其一」，用 `Must(Any(a, b))` 或
+  显式调 `MinimumShouldMatch(1)`——`Any` 自带 `minimum_should_match`，语义不随上下文变化。
+- 三个组合器不传子句时生成不施加约束的查询，使「条件列表为空」不会变成匹配不到任何文档。
 - `Page` 对页码小于 1、每页条数非正做归一，不报错。
 - 构建过程不是并发安全的；构建完成后的 `Do` / `DoAgg` / `Count` 可并发调用。
-- `Result.Total` 受 ES 的 `track_total_hits` 限制，默认最多精确到 10000，
-  超出时 `TotalRelation` 为 `"gte"`。
+- `Result.Total` 默认最多精确到 10000，超出时 `TotalRelation` 为 `"gte"`；
+  用 `TrackTotalHits(n)` 抬高上界，或 `TrackAllHits()` 要求全量精确，代价随匹配数增长。
+- 高亮的字段级配置优先于 `HighlightWith` 的全局配置，覆盖由 Elasticsearch 保证；
+  `HighlightWith` 只设默认值，字段仍要经 `Highlight` 或 `HighlightField` 指定。
+
+## 文本分析
+
+检索结果不符预期时，先看文本实际被切成了什么词，比对着查询语句猜更直接。
+
+```go
+tokens, err := c.Analyze(ctx, "永久免费的搜索引擎",
+	esx.WithAnalyzeIndex("articles"),   // 用该索引 settings 里定义的分析器
+	esx.WithAnalyzer("ik_max_word"),
+)
+for _, t := range tokens {
+	fmt.Println(t.Token, t.Type, t.Position, t.StartOffset, t.EndOffset)
+}
+```
+
+分析方式有三种指定途径，可按需组合：
+
+| 选项 | 作用 |
+|---|---|
+| `WithAnalyzer(name)` | 按分析器名称，如 `standard`、`ik_max_word` |
+| `WithAnalyzeField(field)` | 沿用该字段 mapping 所配的分析器，需与 `WithAnalyzeIndex` 同用 |
+| `WithAnalyzeTokenizer(name)` + `WithAnalyzeFilters(names...)` | 临时拼一条分析链，不必先落地定义 |
+
+`WithAnalyzeCharFilters` 指定分词之前作用于原文的字符过滤器（如 `html_strip`）。
+
+### 使用约束
+
+- 待分析文本为空时在发出请求前返回错误。
+- 三种途径都不指定时，由 Elasticsearch 用默认分析器处理。
+- `WithAnalyzeIndex` 指定的索引不存在时，错误满足 `errors.Is(err, esx.ErrNotFound)`。
 
 ## 错误处理
 

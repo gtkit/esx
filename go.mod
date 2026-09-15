@@ -3,7 +3,7 @@ module github.com/gtkit/esx
 go 1.27
 
 require (
-	github.com/elastic/elastic-transport-go/v8 v8.9.0
+	github.com/elastic/elastic-transport-go/v8 v8.11.0
 	github.com/elastic/go-elasticsearch/v9 v9.5.2
 )
 
