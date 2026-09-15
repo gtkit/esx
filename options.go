@@ -101,9 +101,14 @@ func newConfig(opts []Option) *config {
 }
 
 // tlsConfig 构造 TLS 设置。最低版本固定 TLS 1.2，没有下调入口。
+//
+// InsecureSkipVerify 默认关闭，只能由 WithInsecureSkipVerify 显式开启，该选项的 GoDoc
+// 已标注仅限本地开发调试。抑制指令写两套：gosec 独立运行认 #nosec，golangci-lint 内置的
+// gosec 认 //nolint:gosec，发版脚本两者都跑。
 func (c *config) tlsConfig() *tls.Config {
+	// #nosec G402 -- InsecureSkipVerify 由显式选项控制，默认关闭，最低版本固定 1.2 不可下调
 	return &tls.Config{
 		MinVersion:         tls.VersionTLS12,
-		InsecureSkipVerify: c.insecureTLS, //nolint:gosec // 由 WithInsecureSkipVerify 显式开启，其 GoDoc 已标注仅限开发调试
+		InsecureSkipVerify: c.insecureTLS, //nolint:gosec // 见上方 #nosec 说明
 	}
 }
