@@ -54,8 +54,10 @@ func TestGetDoc(t *testing.T) {
 	t.Run("服务端错误携带状态码", func(t *testing.T) {
 		t.Parallel()
 		c, _ := stubES(t, map[string]route{
-			"/orders/_doc/1": {status: http.StatusInternalServerError,
-				body: `{"error":{"type":"internal","reason":"boom"},"status":500}`},
+			"/orders/_doc/1": {
+				status: http.StatusInternalServerError,
+				body:   `{"error":{"type":"internal","reason":"boom"},"status":500}`,
+			},
 		})
 		_, err := esx.GetDoc[order](t.Context(), c, "orders", "1")
 		e, ok := errors.AsType[*esx.Error](err)
@@ -184,8 +186,10 @@ func TestIndexUpdateDeleteDoc(t *testing.T) {
 	t.Run("UpdateDoc 不存在映射为 ErrNotFound", func(t *testing.T) {
 		t.Parallel()
 		c, _ := stubES(t, map[string]route{
-			"/_update/missing": {status: http.StatusNotFound,
-				body: `{"error":{"type":"document_missing_exception","reason":"missing"},"status":404}`},
+			"/_update/missing": {
+				status: http.StatusNotFound,
+				body:   `{"error":{"type":"document_missing_exception","reason":"missing"},"status":404}`,
+			},
 		})
 		err := c.UpdateDoc(t.Context(), "orders", "missing", map[string]any{"a": 1})
 		if !errors.Is(err, esx.ErrNotFound) {

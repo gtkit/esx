@@ -103,8 +103,10 @@ func TestCreateIndex(t *testing.T) {
 	t.Run("索引已存在返回带状态码的错误", func(t *testing.T) {
 		t.Parallel()
 		c, _ := stubES(t, map[string]route{
-			"/orders": {status: http.StatusBadRequest,
-				body: `{"error":{"type":"resource_already_exists_exception","reason":"exists"},"status":400}`},
+			"/orders": {
+				status: http.StatusBadRequest,
+				body:   `{"error":{"type":"resource_already_exists_exception","reason":"exists"},"status":400}`,
+			},
 		})
 		err := c.CreateIndex(t.Context(), "orders")
 		e, ok := errors.AsType[*esx.Error](err)
@@ -179,8 +181,10 @@ func TestResolveAlias(t *testing.T) {
 	t.Run("别名不存在但同名具体索引存在", func(t *testing.T) {
 		t.Parallel()
 		c, _ := stubES(t, map[string]route{
-			"/_alias/orders": {status: http.StatusNotFound,
-				body: `{"error":{"type":"alias_not_found_exception","reason":"missing"},"status":404}`},
+			"/_alias/orders": {
+				status: http.StatusNotFound,
+				body:   `{"error":{"type":"alias_not_found_exception","reason":"missing"},"status":404}`,
+			},
 			"/orders": {status: http.StatusOK, body: `{}`},
 		})
 		st, err := c.ResolveAlias(t.Context(), "orders")
@@ -198,8 +202,10 @@ func TestResolveAlias(t *testing.T) {
 	t.Run("别名与同名索引都不存在", func(t *testing.T) {
 		t.Parallel()
 		c, _ := stubES(t, map[string]route{
-			"/_alias/nope": {status: http.StatusNotFound,
-				body: `{"error":{"type":"alias_not_found_exception","reason":"missing"},"status":404}`},
+			"/_alias/nope": {
+				status: http.StatusNotFound,
+				body:   `{"error":{"type":"alias_not_found_exception","reason":"missing"},"status":404}`,
+			},
 			"/nope": {status: http.StatusNotFound, body: `{}`},
 		})
 		st, err := c.ResolveAlias(t.Context(), "nope")
@@ -214,8 +220,10 @@ func TestResolveAlias(t *testing.T) {
 	t.Run("服务端错误原样返回", func(t *testing.T) {
 		t.Parallel()
 		c, _ := stubES(t, map[string]route{
-			"/_alias/orders": {status: http.StatusInternalServerError,
-				body: `{"error":{"type":"internal","reason":"boom"},"status":500}`},
+			"/_alias/orders": {
+				status: http.StatusInternalServerError,
+				body:   `{"error":{"type":"internal","reason":"boom"},"status":500}`,
+			},
 		})
 		if _, err := c.ResolveAlias(t.Context(), "orders"); err == nil {
 			t.Fatal("want error, got nil")
@@ -260,8 +268,10 @@ func TestSwitchAlias(t *testing.T) {
 	t.Run("服务端拒绝时返回错误", func(t *testing.T) {
 		t.Parallel()
 		c, _ := stubES(t, map[string]route{
-			"/_aliases": {status: http.StatusBadRequest,
-				body: `{"error":{"type":"illegal_argument_exception","reason":"bad"},"status":400}`},
+			"/_aliases": {
+				status: http.StatusBadRequest,
+				body:   `{"error":{"type":"illegal_argument_exception","reason":"bad"},"status":400}`,
+			},
 		})
 		state := esx.AliasState{Name: "orders", Targets: []string{"orders-v1"}}
 		if err := c.SwitchAlias(t.Context(), state, "orders-v2"); err == nil {

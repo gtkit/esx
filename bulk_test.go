@@ -58,7 +58,7 @@ func TestBulkActionShapes(t *testing.T) {
 	})
 
 	t.Run("delete 只有动作行没有文档行", func(t *testing.T) {
-		var deleteIdx = -1
+		deleteIdx := -1
 		for i, l := range lines {
 			if strings.Contains(l, `"delete"`) {
 				deleteIdx = i
