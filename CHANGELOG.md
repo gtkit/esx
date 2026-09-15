@@ -10,6 +10,9 @@
 - **高亮两层配置**：`HighlightWith` 设全局默认，`HighlightField` 给单个字段单独配置，两层都支持标签对（`WithHighlightTags`）、片段大小（`WithHighlightFragmentSize`）、片段数量（`WithHighlightFragments`）。字段级优先于全局，覆盖关系由 Elasticsearch 保证，本包不在客户端侧合并两层取值。原 `Highlight(fields...)` 的签名与行为不变，此时该字段沿用全局配置。
 - **命中总数统计精度**：`TrackTotalHits(upTo)` 把精确统计的上界抬到指定条数，`TrackAllHits()` 要求精确统计全部命中。未设置时不生成该结构，保持 Elasticsearch 默认只精确统计到 10000 条的行为。
 
+- **文档批量读取**：`MGet[T]` 按 id 列表一次请求取回全部文档，返回以文档 id 为键的映射。此前批量读只能循环 `GetDoc`，取 N 个文档就发出 N 次请求。不存在的文档不在映射中且不构成错误，id 列表为空时不发请求，索引名为空或 id 含空字符串在发请求前被拒绝，条目级错误整次返回而不静默丢弃。
+- **聚合构造器**：`TermsAgg`、`DateHistogramAgg`、`AvgAgg`、`SumAgg`、`MinAgg`、`MaxAgg`、`CardinalityAgg`，省掉手拼 `types.Aggregations` 的样板（一个最简 terms 聚合原本需要 7 行）。`TermsAgg` 的分组条数取非正值时沿用 Elasticsearch 默认值。
+
 - **布尔组合器**：`Any`、`All`、`Not` 把若干查询组合成一个可嵌套的 bool 查询，分别表达「至少命中其一」「全部命中」「全部不命中」。`Any` 显式设置 `minimum_should_match` 而不依赖 Elasticsearch 的默认值——该默认值在同级存在 `must` 或 `filter` 时为 0、否则为 1，靠默认值会让同一个组合在不同上下文里语义不同。三者不传子句时生成不施加约束的查询，使「条件列表为空」不会变成匹配不到任何文档。
 
 ### Changed

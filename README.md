@@ -82,6 +82,7 @@ func main() {
 | `c.ResolveAlias(ctx, alias)` | 解析别名当前指向 |
 | `c.SwitchAlias(ctx, state, newIndex)` | 单请求内原子切换别名 |
 | `GetDoc[T](ctx, c, index, id)` | 读取文档并解码为 `T` |
+| `MGet[T](ctx, c, index, ids...)` | 按 id 批量读取，一次请求，返回 id 到文档的映射 |
 | `c.IndexDoc(ctx, index, id, doc)` | 写入文档，已存在时整体替换 |
 | `c.UpdateDoc(ctx, index, id, partial)` | 部分字段更新 |
 | `c.DeleteDoc(ctx, index, id)` | 删除文档 |
@@ -94,6 +95,7 @@ func main() {
 | `s.TrackTotalHits/TrackAllHits` | 抬高总数精确统计上界 / 要求全量精确 |
 | `c.Analyze(ctx, text, opts...)` | 分析文本，返回切出的词项 |
 | `Any/All/Not(queries...)` | 布尔组合器，用于嵌套条件 |
+| `TermsAgg/DateHistogramAgg/...` | 常用聚合构造器 |
 
 ## Options
 
@@ -197,6 +199,15 @@ err = c.IndexDoc(ctx, "orders", "1", order)              // 已存在时整体�
 err = c.UpdateDoc(ctx, "orders", "1", map[string]any{"status": "shipped"})
 err = c.DeleteDoc(ctx, "orders", "1")
 ok, err := c.DocExists(ctx, "orders", "1")               // 文档或索引不存在均返回 (false, nil)
+
+// 批量读取：全部 id 收敛到一次请求
+docs, err := esx.MGet[Order](ctx, c, "orders", ids...)
+for _, id := range ids {
+	if doc, ok := docs[id]; ok {
+		// 命中；缺失的 id 不在 map 中
+		_ = doc
+	}
+}
 ```
 
 ### 使用约束
@@ -205,6 +216,9 @@ ok, err := c.DocExists(ctx, "orders", "1")               // 文档或索引不�
   `DeleteDoc` 是否当作幂等成功由调用方决定。
 - `GetDoc` 中 `_source` 解码失败返回的错误**不**匹配 `ErrNotFound`，两者可以区分。
 - 索引名与文档 id 为空时在发出请求之前就被拒绝。
+- `MGet` 以文档 id 为键返回；不存在的文档不在映射中，也不构成错误。手里的 id 列表就是
+  顺序，按它遍历即可。id 列表为空时不发出请求；某个条目被 Elasticsearch 判定为错误时
+  整次调用返回错误，不静默丢弃。
 
 ## 批量写入
 
@@ -300,6 +314,19 @@ esx.NewSearch[Order](c, "orders").
 	Must(esx.Any(esx.Match("title", "手机"), esx.Match("body", "手机")))
 ```
 
+聚合同样有构造器，产物直接交给 `Agg`：
+
+```go
+aggs, err := esx.NewSearch[Order](c, "orders").
+	Agg("by_status", esx.TermsAgg("status", 10)).
+	Agg("daily", esx.DateHistogramAgg("created_at", calendarinterval.Day)).
+	Agg("avg_amount", esx.AvgAgg("amount")).
+	DoAgg(ctx)
+```
+
+内置聚合构造器：`TermsAgg`、`DateHistogramAgg`、`AvgAgg`、`SumAgg`、`MinAgg`、`MaxAgg`、
+`CardinalityAgg`。未覆盖的聚合直接构造 `types.Aggregations` 传给 `Agg`。
+
 ### 使用约束
 
 - 同类子句多次调用是累积而非覆盖；`Agg` 同名重复追加时后者覆盖前者。
@@ -309,6 +336,9 @@ esx.NewSearch[Order](c, "orders").
   文档不必满足 a 或 b，两者只参与打分。要表达「必须命中其一」，用 `Must(Any(a, b))` 或
   显式调 `MinimumShouldMatch(1)`——`Any` 自带 `minimum_should_match`，语义不随上下文变化。
 - 三个组合器不传子句时生成不施加约束的查询，使「条件列表为空」不会变成匹配不到任何文档。
+- `TermsAgg` 的分组条数取非正值时不写入请求，沿用 Elasticsearch 的默认值；该聚合要求字段
+  不分词（如 keyword），对 text 字段分组得到的是词项而非原值。
+- `CardinalityAgg` 是基数估算而非精确计数，用于量级判断而非对账。
 - `Page` 对页码小于 1、每页条数非正做归一，不报错。
 - 构建过程不是并发安全的；构建完成后的 `Do` / `DoAgg` / `Count` 可并发调用。
 - `Result.Total` 默认最多精确到 10000，超出时 `TotalRelation` 为 `"gte"`；
