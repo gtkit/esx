@@ -2,6 +2,13 @@
 
 本文件记录 esx 的版本变更。
 
+## [v0.1.1] - 2026-09-15
+
+### Fixed
+
+- **文档**：删除 `WithPing` 关于「服务端大版本不匹配会在构造时暴露」的表述。`ping` 只调 `Info()`，而 `go-elasticsearch` 的产品检查只比对响应头 `X-Elastic-Product` 是否为 `Elasticsearch`，不读版本号，该头自 ES 7.14 起各大版本均返回。GoDoc、`doc.go` 与 README 改为陈述实际覆盖范围：连通性、认证、对端是否为 Elasticsearch。行为未变。
+- **文档**：`doc.go` 与 README 的服务端版本说明改为实测结论。原措辞「对 8.x 服务端的请求体形状不保证被接受」偏轻：v9 的 typedapi 在生成代码里无条件设置 `compatible-with=9`，8.x 只接受 7 或 8，收到 9 时以 `media_type_header_exception` 返回 400（实测 `elasticsearch:8.15.0`），请求体不会被解析。
+
 ## [v0.1.0] - 2026-09-15
 
 ### Added

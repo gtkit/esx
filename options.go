@@ -84,10 +84,14 @@ func WithInsecureSkipVerify() Option {
 	return func(c *config) { c.insecureTLS = true }
 }
 
-// WithPing 让 New 在返回前做一次连通性校验。
+// WithPing 让 New 在返回前做一次集群信息查询。
 //
 // 校验失败时 New 返回错误而不是一个不可用的客户端，使集群不可达、认证失败、
-// 服务端大版本不匹配这类问题在启动时暴露，而不是拖到第一次查询。
+// 对端不是 Elasticsearch 这三类问题在启动时暴露，而不是拖到第一次查询。
+//
+// 它不比对服务端版本：go-elasticsearch 的产品检查只校验响应头
+// X-Elastic-Product 是否为 Elasticsearch，而该头自 7.14 起各大版本均会返回。
+// 需要版本门禁的调用方用 [Client.Typed] 取出客户端自行查 Info。
 func WithPing() Option {
 	return func(c *config) { c.ping = true }
 }

@@ -27,7 +27,7 @@ type Client struct {
 
 // New 构造客户端。
 //
-// 本包面向 Elasticsearch 9.x 服务端，详见包文档。传 WithPing 可让连通性与版本问题
+// 本包面向 Elasticsearch 9.x 服务端，详见包文档。传 WithPing 可让连通性与认证问题
 // 在此处暴露；不传则 New 不发起任何请求。
 func New(opts ...Option) (*Client, error) {
 	cfg := newConfig(opts)

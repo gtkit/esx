@@ -5,9 +5,13 @@
 //
 // # 服务端版本
 //
-// 本包面向 Elasticsearch 9.x。go-elasticsearch/v9 的 typedapi 请求结构按 9.x 的 REST spec
-// 生成，对 8.x 服务端的请求体形状不保证被接受。用 [WithPing] 可以让版本或连通性问题在
-// 构造时暴露，而不是拖到第一次查询。
+// 本包面向 Elasticsearch 9.x。go-elasticsearch/v9 的 typedapi 在每个 API 的生成代码里
+// 无条件设置 Accept 与 Content-Type 为 application/vnd.elasticsearch+json;compatible-with=9，
+// 该头不受 elasticsearch.Config 或本包的选项控制。8.x 服务端只接受 compatible-with 为 7 或 8，
+// 收到 9 时以 media_type_header_exception 返回 400（实测 8.15.0），请求体不会被解析。
+// 因此本包所有走 typedapi 的操作对 8.x 服务端都失败，[WithPing] 在构造阶段即返回错误。
+//
+// [WithPing] 校验的是连通性、认证与对端是否为 Elasticsearch，不比对服务端版本。
 //
 // # 快速开始
 //

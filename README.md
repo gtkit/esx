@@ -5,7 +5,9 @@ Elasticsearch 通用客户端适配层，基于 [go-elasticsearch/v9](https://gi
 把客户端构造、索引与别名管理、文档操作、批量写入、查询构建收敛成一组稳定契约，
 使用方不必各自拼装 `elasticsearch.Config`、TLS transport、BulkIndexer 与 typedapi 请求结构。
 
-- 面向 **Elasticsearch 9.x** 服务端
+- 面向 **Elasticsearch 9.x** 服务端。`go-elasticsearch/v9` 的 typedapi 在生成代码里无条件发
+  `compatible-with=9`，而 8.x 只接受 7 或 8，收到 9 时返回 400 `media_type_header_exception`
+  （实测 8.15.0），该头不受本包选项控制
 - 除 `go-elasticsearch/v9` 外无第三方直接依赖
 - Go 1.27+
 
@@ -152,6 +154,8 @@ c, err := esx.New(
 - `Close` 幂等：重复调用返回首次调用的结果。底层 `go-elasticsearch` 的 `Close` 第二次
   调用会返回 `ErrAlreadyClosed`，本包屏蔽了这一差异。
 - `WithPing` 失败时 `New` 返回错误而非一个不可用的客户端，并顺手关闭已建立的连接。
+- `WithPing` 校验的是连通性、认证与对端是否为 Elasticsearch（`go-elasticsearch` 的产品检查
+  只比对响应头 `X-Elastic-Product`），不比对服务端版本。需要版本门禁用 `c.Typed().Info()` 自行实现。
 
 ## 索引与别名
 
